@@ -1,3 +1,8 @@
-//
-// Created by cjsid on 5/5/2022.
-//
+#include <stdio.h>
+#include <stdlib.h>
+
+int main() {
+    printf(": <input command here>");
+
+    return EXIT_SUCCESS;
+}
