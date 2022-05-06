@@ -22,8 +22,8 @@ struct Command {
 
 
 void SIGINT_handler(int signalNumber){
-    char* message = "Caught SIGINT!\n";
-    write(STDOUT_FILENO, message, 15);
+//    char* message = "^C";
+//    write(STDOUT_FILENO, message, 2);
 }
 
 
@@ -112,8 +112,14 @@ void readLine(char* inputBuffer, const char* pidString, int pidStringLength) {
         currentChar = fgetc(stdin);
     }
 
-    fprintf(stderr, "\nfgetc() found EOF; stdin must have been closed; exiting\n");
-    exit(1);
+    // If EOF actually found, exit with an error. If user did Ctrl-C, clear error and this function will
+    // return. In main, we will loop back again and read another line of input from the user.
+    if (feof(stdin)) {
+        fprintf(stderr, "\nfgetc() found EOF; stdin must have been closed; exiting\n");
+        exit(1);
+    } else if (ferror(stdin)) {
+        clearerr(stdin);
+    }
 }
 
 
@@ -128,21 +134,26 @@ int main(int argc, char* argv[]) {
     int exitStatus = 0;
 
     // Initialize struct to prevent SIGINT (Ctrl-C) from terminating smallsh
-    struct sigaction SIGINT_action = {0};
-    SIGINT_action.sa_handler = SIGINT_handler;
-    // Block all catchable signals while signal handler is running
-    sigfillset(&SIGINT_action.sa_mask);
-    // No flags
-    SIGINT_action.sa_flags = 0;
-    // Install signal handler
-    sigaction(SIGINT, &SIGINT_action, NULL);
+//    struct sigaction SIGINT_action = {0};
+//    SIGINT_action.sa_handler = SIGINT_handler;
+//    // Block all catchable signals while signal handler is running
+//    sigfillset(&SIGINT_action.sa_mask);
+//    // No flags
+//    SIGINT_action.sa_flags = 0;
+//    // Install signal handler
+//    sigaction(SIGINT, &SIGINT_action, NULL);
+
+    // Setup ignore_action to ignore SIGINT (Ctrl-C)
+    struct sigaction ignore_action = {0};
+    ignore_action.sa_handler = SIG_IGN;
+    sigaction(SIGINT, &ignore_action, NULL);
+
 
     // Get the PID for the smallsh instance in string form for variable expansion
     pid_t shellPid = getpid();
     int pidStringLength = snprintf(NULL, 0, "%d", shellPid);
     char pidString[pidStringLength];
     sprintf(pidString, "%d", shellPid);
-
 
 
     while (1) {
