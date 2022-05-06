@@ -5,22 +5,23 @@
 #include <unistd.h>
 
 
-//struct Command {
-//    // Structure to store info about a user's entered command
-//    char* commandName;
-//    char* arguments[512];
-//    bool input_redirect;
-//    char* input_redirect_name;
-//    bool output_redirect;
-//    char* output_redirect_name;
-//    bool sendToBackground;
-//};
+struct Command {
+    // Structure to store info about a user's entered command
+    char* commandName;
+    int totalArguments;
+    char* arguments[512];
+    bool input_redirect;
+    char* input_redirect_name;
+    bool output_redirect;
+    char* output_redirect_name;
+    bool sendToBackground;
+};
 
-void readLine(char* inputBuffer, char* pidString, int pidStringLength) {
-    // Reads in a line of input from stdin that is a maximum of 2048 characters
+void readLine(char* inputBuffer, const char* pidString, int pidStringLength) {
+    // Reads in a line of input from stdin to inputBuffer that is a maximum of 2048 characters
     int index = 0;
 
-    while (1) {
+    while (index < 2048) {
         int currentChar = fgetc(stdin);
         if (currentChar == EOF || currentChar == '\n') break;
 
@@ -50,7 +51,6 @@ void readLine(char* inputBuffer, char* pidString, int pidStringLength) {
             index++;
         }
     }
-
 }
 
 
@@ -61,23 +61,13 @@ int main(int argc, char* argv[]) {
         exit(1);
     }
 
-//    char* userCommand;
     char inputBuffer[2048];
-
 
     // Get the PID for the smallsh instance in string form for variable expansion
     pid_t shellPid = getpid();
     int pidStringLength = snprintf(NULL, 0, "%d", shellPid);
     char pidString[pidStringLength];
     sprintf(pidString, "%d", shellPid);
-
-
-
-    // Declare a struct to store the user's command and initialize defaults
-//    struct Command userCommand;
-//    userCommand.input_redirect = false;
-//    userCommand.output_redirect = false;
-//    userCommand.sendToBackground = false;
 
 
 
@@ -90,17 +80,100 @@ int main(int argc, char* argv[]) {
         memset(inputBuffer, '\0', sizeof(inputBuffer));
         readLine(inputBuffer, pidString, pidStringLength);
 
-        break;
+        if (inputBuffer[0] == '#' || inputBuffer[0] == '\0' || inputBuffer[0] == '\n') continue;
+
+        // Declare a struct to store the user's command and initialize defaults
+        struct Command userCommand;
+        userCommand.totalArguments = 0;
+        userCommand.input_redirect = false;
+        userCommand.output_redirect = false;
+        userCommand.sendToBackground = false;
+
+        char* token;
+        int argumentIndex = 0;
+
+        // strtok the inputBuffer and break it up by empty spaces?
+        // first strtok gets you command
+        token = strtok(inputBuffer, " ");
+        userCommand.commandName = token;
+        userCommand.arguments[argumentIndex] = token;
+        userCommand.totalArguments++;
+        argumentIndex++;
+
+
+        // then keep strtok until you get <, >, &, or NULL
+        while (1) {
+            token = strtok(NULL, " ");
+            if (token == NULL) {
+                break;
+            } else if (strcmp(token, "<") == 0) {
+                token = strtok(NULL, " ");
+                userCommand.input_redirect = true;
+                userCommand.input_redirect_name = token;
+            } else if (strcmp(token, ">") == 0) {
+                token = strtok(NULL, " ");
+                userCommand.output_redirect = true;
+                userCommand.output_redirect_name = token;
+            } else if (strcmp(token, "&") == 0) {
+                token = strtok(NULL, " ");
+                if (token == NULL) {
+                    // & is last argument, this command should go to background
+                    userCommand.sendToBackground = true;
+                    break;
+                } else {
+                    // & found but not last argument, should be treated as regular argument
+                    userCommand.arguments[argumentIndex] = "&";
+                    userCommand.arguments[argumentIndex + 1] = token;
+                    userCommand.totalArguments += 2;
+                    argumentIndex += 2;
+                }
+            } else {
+                userCommand.arguments[argumentIndex] = token;
+                userCommand.totalArguments++;
+                argumentIndex++;
+            }
+        }
+
+        // TESTING - Print out the contents of the userCommand struct----------------------------------
+        printf("userCommand.commandName = %s\n", userCommand.commandName);
+
+        printf("userCommand.totalArguments = %d\n", userCommand.totalArguments);
+        printf("userCommand.arguments = ");
+        for (int i = 0; i < userCommand.totalArguments; i++) {
+            printf("%s ", userCommand.arguments[i]);
+        }
+        printf("\n");
+
+        if (userCommand.input_redirect == true) {
+            printf("userCommand.input_redirect = true\n");
+            printf("userCommand.input_redirect_name = %s\n", userCommand.input_redirect_name);
+        } else {
+            printf("userCommand.input_redirect = false\n");
+        }
+
+        if (userCommand.output_redirect == true) {
+            printf("userCommand.output_redirect = true\n");
+            printf("userCommand.output_redirect_name = %s\n", userCommand.output_redirect_name);
+        } else {
+            printf("userCommand.output_redirect = false\n");
+        }
+
+        printf("userCommand.sendToBackground = %s\n", userCommand.sendToBackground ? "true" : "false");
+        // --------------------------------------------------------------------------------------------
+
+
+        // TODO - Need to clean up all child processes here before breaking out?
+        if (strcmp(userCommand.commandName, "exit") == 0) break;
     }
 
-    int index = 0;
-
-    while (index < 2048 && inputBuffer[index] != EOF) {
-        fputc(inputBuffer[index], stdout);
-        index++;
-    }
-
-    fputc('\n', stdout);
+//    int index = 0;
+//
+//    while (index < 2048 && inputBuffer[index] != EOF) {
+//        fputc(inputBuffer[index], stdout);
+//        index++;
+//    }
+//
+//    fputc('\n', stdout);
 
 
     // Read in a line of user input one char at a time
