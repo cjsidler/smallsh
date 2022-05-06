@@ -4,13 +4,15 @@
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
+#include <err.h>
+#include <errno.h>
 
 
 struct Command {
     // Structure to store info about a user's entered command
     char* commandName;
     int totalArguments;
-    char* arguments[512];
+    char* arguments[513];
     bool input_redirect;
     char* input_redirect_name;
     bool output_redirect;
@@ -25,22 +27,70 @@ void SIGINT_handler(int signalNumber){
 }
 
 
+void cd(char* pathName) {
+    // Changes the working directory of smallsh. With no arguments, changes to the
+    // directory in the HOME environment variable. One path argument is allowed.
+    // Both absolute and relative paths are supported.
+
+    if (pathName == NULL) {
+        printf("hmm pathName is NULL..chdir to $HOME?\n");
+    } else {
+        printf("pathName is not NULL..chdir to %s\n", pathName);
+    }
+    fflush(stdout);
+
+    char cur_dir[FILENAME_MAX];
+    getcwd(cur_dir, sizeof(cur_dir));
+    printf("cwd is: %s\n", cur_dir);
+    fflush(stdout);
+
+    if (pathName == NULL) {
+        if(chdir(getenv("HOME")) != 0) err(errno, "chdir()");
+    } else {
+        if(chdir(pathName) != 0) err(errno, "chdir()");
+    }
+
+    getcwd(cur_dir, sizeof(cur_dir));
+    printf("cwd is: %s\n", cur_dir);
+    fflush(stdout);
+
+}
+
+
+//void exit(void) {
+    // Exits smallsh. Takes no arguments. The shell will kill any other processes
+    // or jobs that the shell started before it terminates itself.
+
+//}
+
+
+void status(void) {
+    // Prints exit status or the terminating signal of the last foreground
+    // ran by smallsh. If run before any foreground command is run, the exit
+    // status of 0 is returned. Built-in shell commands cd, exit, and status
+    // are not counted as foreground processes and won't update status.
+}
+
+
 void readLine(char* inputBuffer, const char* pidString, int pidStringLength) {
     // Reads in a line of input from stdin to inputBuffer that is a maximum of 2048 characters
     int index = 0;
 
-    while (index < 2048) {
-        int currentChar = fgetc(stdin);
-        if (currentChar == EOF || currentChar == '\n') break;
+    int currentChar;
+    currentChar = fgetc(stdin);
+
+    while (currentChar != EOF) {
+        if (currentChar == '\n') return;
 
         // If we run into a $, check to see if next character is also $
         if (currentChar == '$') {
             // Break out if the current char is the last possible (2047th index)
-            if (index + 1 == 2048) break;
+            if (index + 1 == 2048) return;
 
             // Otherwise, check the next character to see if it is also '$'
             int nextChar = fgetc(stdin);
-            if (nextChar == EOF || nextChar == '\n') break;
+            if (nextChar == '\n') return;
+            if (nextChar == EOF) break;
 
             if (nextChar == '$') {
                 // variable expansion (add pidString to inputBuffer)
@@ -58,7 +108,12 @@ void readLine(char* inputBuffer, const char* pidString, int pidStringLength) {
             inputBuffer[index] = currentChar;
             index++;
         }
+
+        currentChar = fgetc(stdin);
     }
+
+    fprintf(stderr, "\nfgetc() found EOF; stdin must have been closed; exiting\n");
+    exit(1);
 }
 
 
@@ -70,6 +125,7 @@ int main(int argc, char* argv[]) {
     }
 
     char inputBuffer[2048];
+    int exitStatus = 0;
 
     // Initialize struct to prevent SIGINT (Ctrl-C) from terminating smallsh
     struct sigaction SIGINT_action = {0};
@@ -113,6 +169,9 @@ int main(int argc, char* argv[]) {
         // strtok the inputBuffer and break it up by empty spaces?
         // first strtok gets you command
         token = strtok(inputBuffer, " ");
+        if (token == NULL) {
+            continue;
+        }
         userCommand.commandName = token;
         userCommand.arguments[argumentIndex] = token;
         userCommand.totalArguments++;
@@ -132,19 +191,6 @@ int main(int argc, char* argv[]) {
                 token = strtok(NULL, " ");
                 userCommand.output_redirect = true;
                 userCommand.output_redirect_name = token;
-            } else if (strcmp(token, "&") == 0) {
-                token = strtok(NULL, " ");
-                if (token == NULL) {
-                    // & is last argument, this command should go to background
-                    userCommand.sendToBackground = true;
-                    break;
-                } else {
-                    // & found but not last argument, should be treated as regular argument
-                    userCommand.arguments[argumentIndex] = "&";
-                    userCommand.arguments[argumentIndex + 1] = token;
-                    userCommand.totalArguments += 2;
-                    argumentIndex += 2;
-                }
             } else {
                 userCommand.arguments[argumentIndex] = token;
                 userCommand.totalArguments++;
@@ -152,9 +198,21 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Make sure the last argument is NULL so exec will work
-        userCommand.arguments[argumentIndex] = NULL;
-        userCommand.totalArguments++;
+        if (userCommand.totalArguments - 1 >= 0 && strcmp(userCommand.arguments[userCommand.totalArguments - 1], "&") == 0) {
+            // Last argument is &, make sendToBackground true if command is not exit, cd, or status
+            if ( strcmp(userCommand.arguments[0], "exit") != 0 &&
+                 strcmp(userCommand.arguments[0], "cd") != 0 &&
+                 strcmp(userCommand.arguments[0], "status") != 0) {
+                userCommand.sendToBackground = true;
+            }
+            // Replace the last argument (&) with NULL
+            userCommand.arguments[userCommand.totalArguments - 1] = NULL;
+        } else {
+            // Otherwise, make sure the last argument is NULL so exec will work
+            userCommand.arguments[argumentIndex] = NULL;
+            userCommand.totalArguments++;
+        }
+
 
         // TESTING - Print out the contents of the userCommand struct----------------------------------
         printf("userCommand.commandName = %s\n", userCommand.commandName);
@@ -183,17 +241,21 @@ int main(int argc, char* argv[]) {
         printf("userCommand.sendToBackground = %s\n", userCommand.sendToBackground ? "true" : "false");
         // --------------------------------------------------------------------------------------------
 
+        if (strcmp(userCommand.commandName, "cd") == 0) {
+            printf("user wants to use cd. calling cd.\n");
+            fflush(stdout);
+
+            cd(userCommand.arguments[1]);
+
+            printf("done calling cd.\n");
+            fflush(stdout);
+        }
+
+
 
         // TODO - Need to clean up all child processes here before breaking out?
         if (strcmp(userCommand.commandName, "exit") == 0) break;
     }
-
-    // Read in a line of user input one char at a time
-    // Separate line of user input into the command struct to keep track of:
-    //      1. command name
-    //      2. array of arguments
-    //      3. < input redirect file name (if any; NULL if none)
-    //      4. > output redirect file name (if any; NULL if none)
 
     return EXIT_SUCCESS;
 }
