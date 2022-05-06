@@ -21,54 +21,8 @@ struct Command {
 };
 
 
-void SIGINT_handler(int signalNumber){
-//    char* message = "^C";
-//    write(STDOUT_FILENO, message, 2);
-}
-
-
-void cd(char* pathName) {
-    // Changes the working directory of smallsh. With no arguments, changes to the
-    // directory in the HOME environment variable. One path argument is allowed.
-    // Both absolute and relative paths are supported.
-
-    if (pathName == NULL) {
-        printf("hmm pathName is NULL..chdir to $HOME?\n");
-    } else {
-        printf("pathName is not NULL..chdir to %s\n", pathName);
-    }
-    fflush(stdout);
-
-    char cur_dir[FILENAME_MAX];
-    getcwd(cur_dir, sizeof(cur_dir));
-    printf("cwd is: %s\n", cur_dir);
-    fflush(stdout);
-
-    if (pathName == NULL) {
-        if(chdir(getenv("HOME")) != 0) err(errno, "chdir()");
-    } else {
-        if(chdir(pathName) != 0) err(errno, "chdir()");
-    }
-
-    getcwd(cur_dir, sizeof(cur_dir));
-    printf("cwd is: %s\n", cur_dir);
-    fflush(stdout);
-
-}
-
-
-//void exit(void) {
-    // Exits smallsh. Takes no arguments. The shell will kill any other processes
-    // or jobs that the shell started before it terminates itself.
-
-//}
-
-
 void status(void) {
-    // Prints exit status or the terminating signal of the last foreground
-    // ran by smallsh. If run before any foreground command is run, the exit
-    // status of 0 is returned. Built-in shell commands cd, exit, and status
-    // are not counted as foreground processes and won't update status.
+
 }
 
 
@@ -133,21 +87,10 @@ int main(int argc, char* argv[]) {
     char inputBuffer[2048];
     int exitStatus = 0;
 
-    // Initialize struct to prevent SIGINT (Ctrl-C) from terminating smallsh
-//    struct sigaction SIGINT_action = {0};
-//    SIGINT_action.sa_handler = SIGINT_handler;
-//    // Block all catchable signals while signal handler is running
-//    sigfillset(&SIGINT_action.sa_mask);
-//    // No flags
-//    SIGINT_action.sa_flags = 0;
-//    // Install signal handler
-//    sigaction(SIGINT, &SIGINT_action, NULL);
-
     // Setup ignore_action to ignore SIGINT (Ctrl-C)
     struct sigaction ignore_action = {0};
     ignore_action.sa_handler = SIG_IGN;
     sigaction(SIGINT, &ignore_action, NULL);
-
 
     // Get the PID for the smallsh instance in string form for variable expansion
     pid_t shellPid = getpid();
@@ -252,14 +195,38 @@ int main(int argc, char* argv[]) {
         printf("userCommand.sendToBackground = %s\n", userCommand.sendToBackground ? "true" : "false");
         // --------------------------------------------------------------------------------------------
 
+
         if (strcmp(userCommand.commandName, "cd") == 0) {
-            printf("user wants to use cd. calling cd.\n");
-            fflush(stdout);
+//            char cur_dir[FILENAME_MAX];
+//            getcwd(cur_dir, sizeof(cur_dir));
+//            printf("cwd is: %s\n", cur_dir);
+//            fflush(stdout);
 
-            cd(userCommand.arguments[1]);
+            // If user provided no arguments, chdir to $HOME, otherwise chdir to path provided
+            if (userCommand.arguments[1] == NULL) {
+                if(chdir(getenv("HOME")) != 0) err(errno, "chdir()");
+                printf("path name is NULL. changing directory to $HOME\n");
+                fflush(stdout);
+            } else {
+                if(chdir(userCommand.arguments[1]) != 0) err(errno, "chdir()");
+                printf("path name is not NULL. changing directory to %s\n", userCommand.arguments[1]);
+                fflush(stdout);
+            }
 
-            printf("done calling cd.\n");
-            fflush(stdout);
+//            getcwd(cur_dir, sizeof(cur_dir));
+//            printf("cwd is: %s\n", cur_dir);
+//            fflush(stdout);
+
+        } else if (strcmp(userCommand.commandName, "exit") == 0) {
+            // Exits smallsh. Takes no arguments. The shell will kill any other processes
+            // or jobs that the shell started before it terminates itself.
+
+        } else if (strcmp(userCommand.commandName, "status") == 0) {
+            // Prints exit status or the terminating signal of the last foreground
+            // ran by smallsh. If run before any foreground command is run, the exit
+            // status of 0 is returned. Built-in shell commands cd, exit, and status
+            // are not counted as foreground processes and won't update status.
+
         }
 
 
