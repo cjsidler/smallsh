@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
+#include <signal.h>
 #include <unistd.h>
 
 
@@ -16,6 +17,13 @@ struct Command {
     char* output_redirect_name;
     bool sendToBackground;
 };
+
+
+void SIGINT_handler(int signalNumber){
+    char* message = "Caught SIGINT!\n";
+    write(STDOUT_FILENO, message, 15);
+}
+
 
 void readLine(char* inputBuffer, const char* pidString, int pidStringLength) {
     // Reads in a line of input from stdin to inputBuffer that is a maximum of 2048 characters
@@ -62,6 +70,16 @@ int main(int argc, char* argv[]) {
     }
 
     char inputBuffer[2048];
+
+    // Initialize struct to prevent SIGINT (Ctrl-C) from terminating smallsh
+    struct sigaction SIGINT_action = {0};
+    SIGINT_action.sa_handler = SIGINT_handler;
+    // Block all catchable signals while signal handler is running
+    sigfillset(&SIGINT_action.sa_mask);
+    // No flags
+    SIGINT_action.sa_flags = 0;
+    // Install signal handler
+    sigaction(SIGINT, &SIGINT_action, NULL);
 
     // Get the PID for the smallsh instance in string form for variable expansion
     pid_t shellPid = getpid();
@@ -134,6 +152,10 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        // Make sure the last argument is NULL so exec will work
+        userCommand.arguments[argumentIndex] = NULL;
+        userCommand.totalArguments++;
+
         // TESTING - Print out the contents of the userCommand struct----------------------------------
         printf("userCommand.commandName = %s\n", userCommand.commandName);
 
@@ -165,16 +187,6 @@ int main(int argc, char* argv[]) {
         // TODO - Need to clean up all child processes here before breaking out?
         if (strcmp(userCommand.commandName, "exit") == 0) break;
     }
-
-//    int index = 0;
-//
-//    while (index < 2048 && inputBuffer[index] != EOF) {
-//        fputc(inputBuffer[index], stdout);
-//        index++;
-//    }
-//
-//    fputc('\n', stdout);
-
 
     // Read in a line of user input one char at a time
     // Separate line of user input into the command struct to keep track of:
