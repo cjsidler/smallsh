@@ -85,6 +85,8 @@ int main(int argc, char* argv[]) {
     }
 
     char inputBuffer[2048];
+    pid_t childPids[500];
+    int childPidIndex = 0;
     int exitStatus = 0;
 
     // Setup ignore_action to ignore SIGINT (Ctrl-C)
@@ -197,10 +199,10 @@ int main(int argc, char* argv[]) {
 
 
         if (strcmp(userCommand.commandName, "cd") == 0) {
-//            char cur_dir[FILENAME_MAX];
-//            getcwd(cur_dir, sizeof(cur_dir));
-//            printf("cwd is: %s\n", cur_dir);
-//            fflush(stdout);
+            char cur_dir[FILENAME_MAX];
+            getcwd(cur_dir, sizeof(cur_dir));
+            printf("cwd is: %s\n", cur_dir);
+            fflush(stdout);
 
             // If user provided no arguments, chdir to $HOME, otherwise chdir to path provided
             if (userCommand.arguments[1] == NULL) {
@@ -213,19 +215,60 @@ int main(int argc, char* argv[]) {
                 fflush(stdout);
             }
 
-//            getcwd(cur_dir, sizeof(cur_dir));
-//            printf("cwd is: %s\n", cur_dir);
-//            fflush(stdout);
+            getcwd(cur_dir, sizeof(cur_dir));
+            printf("cwd is: %s\n", cur_dir);
+            fflush(stdout);
 
         } else if (strcmp(userCommand.commandName, "exit") == 0) {
             // Exits smallsh. Takes no arguments. The shell will kill any other processes
             // or jobs that the shell started before it terminates itself.
 
+            break;
         } else if (strcmp(userCommand.commandName, "status") == 0) {
             // Prints exit status or the terminating signal of the last foreground
             // ran by smallsh. If run before any foreground command is run, the exit
             // status of 0 is returned. Built-in shell commands cd, exit, and status
             // are not counted as foreground processes and won't update status.
+
+        } else {
+            // spawn a child
+            int childStatus;
+
+            pid_t spawnpid = fork();
+
+            // TODO - remove after testing/debugging
+            alarm(60);
+
+            switch (spawnpid) {
+                case -1:
+                    perror("fork() failed!");
+                    exit(1);
+
+                case 0:
+                    // child - execute command, with arguments, in fg or bg
+                    execvp(userCommand.commandName, userCommand.arguments);
+
+                    perror("execv");
+                    exit(EXIT_FAILURE);
+
+                default:
+                    //parent
+                    // foreground? wait; background? return immediately
+                    if (userCommand.sendToBackground) {
+                        // don't wait for child
+                        childPids[childPidIndex] = spawnpid;
+                        childPidIndex++;
+
+                        spawnpid = waitpid(spawnpid, &childStatus, WNOHANG);
+
+                    } else {
+                        // wait for child to finish
+                        spawnpid = wait(&childStatus);
+                    }
+
+                    break;
+            }
+
 
         }
 
