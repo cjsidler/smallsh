@@ -7,6 +7,7 @@
 #include <err.h>
 #include <errno.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 
 
 bool childProcessRun = false;
@@ -313,7 +314,44 @@ int main(int argc, char* argv[]) {
 
                 case 0:
                     // child - execute command, with arguments, in fg or bg
+
                     // TODO - handle input and output redirection using dup2()
+                    if (userCommand.input_redirect) {
+                        // redirect input for child using .input_redirect_name
+
+                        // open input file
+                        int sourceFD = open(userCommand.input_redirect_name, O_RDONLY);
+                        if (sourceFD == -1) {
+                            perror("source open()");
+                            exit(1);
+                        }
+
+                        // redirect stdin to file descriptor for input file
+                        int result = dup2(sourceFD, 0);
+                        if (result == -1) {
+                            perror("source dup2()");
+                            exit(2);
+                        }
+                    }
+
+                    if (userCommand.output_redirect) {
+                        // redirect output for child
+
+                        // open output file
+                        int targetFD = open(userCommand.output_redirect_name, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                        if (targetFD == -1) {
+                            perror("target open()");
+                            exit(1);
+                        }
+
+                        // redirect stdout to file descriptor for output file
+                        int result = dup2(targetFD, 1);
+                        if (result == -1) {
+                            perror("dup2");
+                            exit(2);
+                        }
+                    }
+
                     execvp(userCommand.commandName, userCommand.arguments);
 
                     fprintf(stderr, "%s: ", userCommand.commandName);
@@ -322,7 +360,7 @@ int main(int argc, char* argv[]) {
                     exit(EXIT_FAILURE);
 
                 default:
-                    //parent
+                    // parent
                     // foreground? wait; background? return immediately
                     if (userCommand.sendToBackground) {
                         // don't wait for child
