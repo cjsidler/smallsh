@@ -6,6 +6,11 @@
 #include <unistd.h>
 #include <err.h>
 #include <errno.h>
+#include <sys/wait.h>
+
+
+bool childProcessRun = false;
+int lastForegroundExitStatus = 0;
 
 
 struct Command {
@@ -85,9 +90,13 @@ int main(int argc, char* argv[]) {
     }
 
     char inputBuffer[2048];
+
     pid_t childPids[500];
-    int childPidIndex = 0;
-    int exitStatus = 0;
+    memset(childPids, 0, sizeof(childPids));
+    int childPidsCount = 0;
+
+    pid_t backgroundPid;
+    int backgroundProcessExitStatus = 0;
 
     // Setup ignore_action to ignore SIGINT (Ctrl-C)
     struct sigaction ignore_action = {0};
@@ -102,6 +111,36 @@ int main(int argc, char* argv[]) {
 
 
     while (1) {
+        // Before re-prompting, have a while loop go forever until waitpid waiting for
+        // any process returns 0 (meaning no zombie processes to clean up at the moment,
+        // and then re-prompt the user)
+        while(childPidsCount > 0) {
+            // printf("childPidsCount is %d which is > than 0, checking if any have finished before re-prompt\n", childPidsCount);
+
+            backgroundPid = waitpid(-1, &backgroundProcessExitStatus, WNOHANG);
+
+            // ("backgroundPid is: %d\n", backgroundPid);
+
+            if (backgroundPid == 0) {
+                // no child process is complete, break out so we can re-prompt the user for a command
+                break;
+            } else if (backgroundPid == -1) {
+                // err has occurred, exit smallsh?
+                err(errno, "waitpid()");
+            } else {
+                // child process has completed, print out appropriate message and loop back around
+                if (WIFEXITED(backgroundProcessExitStatus)) {
+                    printf("background pid %d is done: exit value %d\n",
+                           backgroundPid, WEXITSTATUS(backgroundProcessExitStatus));
+                } else {
+                    printf("background pid %d is done: terminated by signal %d\n",
+                           backgroundPid, WTERMSIG(backgroundProcessExitStatus));
+                }
+                fflush(stdout);
+                childPidsCount--;
+            }
+        }
+
         // Prompt user for a command
         printf(": ");
         fflush(stdout);
@@ -171,30 +210,30 @@ int main(int argc, char* argv[]) {
 
 
         // TESTING - Print out the contents of the userCommand struct----------------------------------
-        printf("userCommand.commandName = %s\n", userCommand.commandName);
-
-        printf("userCommand.totalArguments = %d\n", userCommand.totalArguments);
-        printf("userCommand.arguments = ");
-        for (int i = 0; i < userCommand.totalArguments; i++) {
-            printf("%s ", userCommand.arguments[i]);
-        }
-        printf("\n");
-
-        if (userCommand.input_redirect == true) {
-            printf("userCommand.input_redirect = true\n");
-            printf("userCommand.input_redirect_name = %s\n", userCommand.input_redirect_name);
-        } else {
-            printf("userCommand.input_redirect = false\n");
-        }
-
-        if (userCommand.output_redirect == true) {
-            printf("userCommand.output_redirect = true\n");
-            printf("userCommand.output_redirect_name = %s\n", userCommand.output_redirect_name);
-        } else {
-            printf("userCommand.output_redirect = false\n");
-        }
-
-        printf("userCommand.sendToBackground = %s\n", userCommand.sendToBackground ? "true" : "false");
+//        printf("userCommand.commandName = %s\n", userCommand.commandName);
+//
+//        printf("userCommand.totalArguments = %d\n", userCommand.totalArguments);
+//        printf("userCommand.arguments = ");
+//        for (int i = 0; i < userCommand.totalArguments; i++) {
+//            printf("%s ", userCommand.arguments[i]);
+//        }
+//        printf("\n");
+//
+//        if (userCommand.input_redirect == true) {
+//            printf("userCommand.input_redirect = true\n");
+//            printf("userCommand.input_redirect_name = %s\n", userCommand.input_redirect_name);
+//        } else {
+//            printf("userCommand.input_redirect = false\n");
+//        }
+//
+//        if (userCommand.output_redirect == true) {
+//            printf("userCommand.output_redirect = true\n");
+//            printf("userCommand.output_redirect_name = %s\n", userCommand.output_redirect_name);
+//        } else {
+//            printf("userCommand.output_redirect = false\n");
+//        }
+//
+//        printf("userCommand.sendToBackground = %s\n", userCommand.sendToBackground ? "true" : "false");
         // --------------------------------------------------------------------------------------------
 
 
@@ -223,12 +262,40 @@ int main(int argc, char* argv[]) {
             // Exits smallsh. Takes no arguments. The shell will kill any other processes
             // or jobs that the shell started before it terminates itself.
 
+            // Loop through the childPids and kill each one and wait on it
+            for (int i = 0; i < childPidsCount; i++ ) {
+                // printf("killing child pid %d\n", childPids[i]);
+
+                // kill process with pid at childPids[i]
+                kill(childPids[i], SIGKILL);
+
+                int zombieStatus;
+
+                // wait on process with pid at childPids[i]
+                waitpid(childPids[i], &zombieStatus, 0);
+            }
+
             break;
         } else if (strcmp(userCommand.commandName, "status") == 0) {
             // Prints exit status or the terminating signal of the last foreground
             // ran by smallsh. If run before any foreground command is run, the exit
-            // status of 0 is returned. Built-in shell commands cd, exit, and status
+            // status of 0 is printed. Built-in shell commands cd, exit, and status
             // are not counted as foreground processes and won't update status.
+            if (childProcessRun) {
+                // interpret lastForegroundExitStatus
+                if (WIFEXITED(lastForegroundExitStatus)) {
+                    // print exit status
+                    printf("exit value %d\n", WEXITSTATUS(lastForegroundExitStatus));
+                    fflush(stdout);
+                } else {
+                    // print signal number
+                    printf("terminated by signal %d\n", WTERMSIG(lastForegroundExitStatus));
+                    fflush(stdout);
+                }
+            } else {
+                printf("exit value 0\n");
+                fflush(stdout);
+            }
 
         } else {
             // spawn a child
@@ -236,7 +303,7 @@ int main(int argc, char* argv[]) {
 
             pid_t spawnpid = fork();
 
-            // TODO - remove after testing/debugging
+            // TODO - remove alarm after testing/debugging
             alarm(60);
 
             switch (spawnpid) {
@@ -246,9 +313,12 @@ int main(int argc, char* argv[]) {
 
                 case 0:
                     // child - execute command, with arguments, in fg or bg
+                    // TODO - handle input and output redirection using dup2()
                     execvp(userCommand.commandName, userCommand.arguments);
 
-                    perror("execv");
+                    fprintf(stderr, "%s: ", userCommand.commandName);
+                    fflush(stderr);
+                    perror("");
                     exit(EXIT_FAILURE);
 
                 default:
@@ -256,20 +326,33 @@ int main(int argc, char* argv[]) {
                     // foreground? wait; background? return immediately
                     if (userCommand.sendToBackground) {
                         // don't wait for child
-                        childPids[childPidIndex] = spawnpid;
-                        childPidIndex++;
+                        printf("background pid is %d\n", spawnpid);
+                        fflush(stdout);
+
+                        // add child's PID to array to later be waited on before re-prompting user?
+                        // probably do the signal method?
+                        if (childPidsCount >= 500) err(errno=EAGAIN, "child processes full");
+
+                        // Find an empty slot in the childPids array to put new background process
+                        int index = 0;
+                        while (index < 500 && childPids[index] != 0) {
+                            index++;
+                        }
+                        if (index < 500 && childPids[index] == 0) {
+                            childPids[index] = spawnpid;
+                            childPidsCount++;
+                        }
 
                         spawnpid = waitpid(spawnpid, &childStatus, WNOHANG);
 
                     } else {
-                        // wait for child to finish
-                        spawnpid = wait(&childStatus);
+                        // foreground processes must be waited on
+                        childProcessRun = true;
+                        spawnpid = wait(&lastForegroundExitStatus);
                     }
 
                     break;
             }
-
-
         }
 
 
