@@ -9,6 +9,8 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 
+volatile sig_atomic_t foregroundOnlyMode = 0;
+
 
 bool childProcessRun = false;
 int lastForegroundExitStatus = 0;
@@ -26,13 +28,23 @@ struct Command {
     bool sendToBackground;
 };
 
+void disableForegroundOnlyMode(int signo);
 
-void sigintHandler(int signo){
-    // Handles SIGINT for a foreground child so it can terminate itself
-    char* message = "Caught SIGINT!\n";
-    write(STDOUT_FILENO, message, 15);
 
-    exit(1);
+void enableForegroundOnlyMode(int signo) {
+    char* message = "Entering foreground-only mode (& is now ignored)\n";
+    write(STDOUT_FILENO, message, 49);
+
+    foregroundOnlyMode = 1;
+    signal(SIGTSTP, disableForegroundOnlyMode);
+}
+
+void disableForegroundOnlyMode(int signo) {
+    char* message = "Exiting foreground-only mode\n";
+    write(STDOUT_FILENO, message, 29);
+
+    foregroundOnlyMode = 0;
+    signal(SIGTSTP, enableForegroundOnlyMode);
 }
 
 
@@ -94,7 +106,12 @@ int main(int argc, char* argv[]) {
         exit(1);
     }
 
-    struct sigaction sigintAction = {0};
+    struct sigaction sigtstpAction = {0};
+
+    sigset_t blockSIGTSTP = {0};
+//    sigset_t blockSIGINT = {0};
+    sigaddset(&blockSIGTSTP, SIGTSTP);
+//    sigaddset(&blockSIGINT, SIGINT);
 
     char inputBuffer[2048];
 
@@ -110,6 +127,13 @@ int main(int argc, char* argv[]) {
     sigset_t ignoreMask = {0};
     sigaddset(&ignoreMask, SIGINT);
     sigprocmask(SIG_SETMASK, &ignoreMask, NULL);
+
+    // Setup sigtstpAction to toggle between enabling and disabling foreground-only mode
+    sigtstpAction.sa_handler = enableForegroundOnlyMode;
+    sigfillset(&sigtstpAction.sa_mask);
+    sigtstpAction.sa_flags = 0;
+    sigaction(SIGTSTP, &sigtstpAction, NULL);
+
 
     // Get the PID for the smallsh instance in string form for variable expansion
     pid_t shellPid = getpid();
@@ -207,9 +231,11 @@ int main(int argc, char* argv[]) {
 
         if (userCommand.totalArguments - 1 >= 0 && strcmp(userCommand.arguments[userCommand.totalArguments - 1], "&") == 0) {
             // Last argument is &, make sendToBackground true if command is not exit, cd, or status
+            // or if foregoundOnlyMode is enabled
             if ( strcmp(userCommand.arguments[0], "exit") != 0 &&
                  strcmp(userCommand.arguments[0], "cd") != 0 &&
-                 strcmp(userCommand.arguments[0], "status") != 0) {
+                 strcmp(userCommand.arguments[0], "status") != 0 &&
+                 foregroundOnlyMode == 0 ) {
                 userCommand.sendToBackground = true;
             }
             // Replace the last argument (&) with NULL
@@ -321,18 +347,23 @@ int main(int argc, char* argv[]) {
             alarm(60);
 
             switch (spawnpid) {
-                case -1:
+                case -1: ;
                     perror("fork() failed!");
                     exit(1);
 
-                case 0:
+                case 0: ;
                     // child - execute command, with arguments, in fg or bg
 
-                    // Implement SIGINT signal handler for foreground child process to terminate
-                    if (!userCommand.sendToBackground) {
-                        sigset_t unignoreMask = {0};
-                        sigprocmask(SIG_SETMASK, &unignoreMask, NULL);
+                    sigset_t childMask = {0};
+
+                    // Only background child processes will ignore SIGINT
+                    if (userCommand.sendToBackground) {
+                        sigaddset(&childMask, SIGINT);
                     }
+
+                    // Both background and foreground child processes will ignore SIGTSTP
+                    sigaddset(&childMask, SIGTSTP);
+                    sigprocmask(SIG_SETMASK, &childMask, NULL);
 
                     if (userCommand.input_redirect || userCommand.sendToBackground) {
                         int sourceFD;
@@ -390,8 +421,14 @@ int main(int argc, char* argv[]) {
                     perror("");
                     exit(EXIT_FAILURE);
 
-                default:
+                default: ;
                     // parent
+
+                    // if foregroundOnlyMode is set, don't send processes to the background
+                    // foreground only !
+                    // block SIGTSTP while letting processes finish
+                    // after process finishes, unblock SIGTSTP?
+
                     // foreground? wait; background? return immediately
                     if (userCommand.sendToBackground) {
                         // don't wait for child
@@ -419,7 +456,14 @@ int main(int argc, char* argv[]) {
                     } else {
                         // foreground processes must block when waited on
                         childProcessRun = true;
+
+                        // block SIGTSTP?
+                        sigprocmask(SIG_BLOCK, &blockSIGTSTP, NULL);
                         spawnpid = waitpid(spawnpid, &lastForegroundExitStatus, 0);
+                        sigprocmask(SIG_UNBLOCK, &blockSIGTSTP, NULL);
+
+                        // unblock SIGTSTP?
+                        // check if the flag is set and if so toggle foreground?
 
                         // If foreground child signaled with SIGINT, notify immediately
                         if (WIFSIGNALED(lastForegroundExitStatus)) {
