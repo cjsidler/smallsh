@@ -32,16 +32,16 @@ void disableForegroundOnlyMode(int signo);
 
 
 void enableForegroundOnlyMode(int signo) {
-    char* message = "Entering foreground-only mode (& is now ignored)\n";
-    write(STDOUT_FILENO, message, 49);
+    char* message = "\nEntering foreground-only mode (& is now ignored)\n";
+    write(STDOUT_FILENO, message, 50);
 
     foregroundOnlyMode = 1;
     signal(SIGTSTP, disableForegroundOnlyMode);
 }
 
 void disableForegroundOnlyMode(int signo) {
-    char* message = "Exiting foreground-only mode\n";
-    write(STDOUT_FILENO, message, 29);
+    char* message = "\nExiting foreground-only mode\n: ";
+    write(STDOUT_FILENO, message, 32);
 
     foregroundOnlyMode = 0;
     signal(SIGTSTP, enableForegroundOnlyMode);
