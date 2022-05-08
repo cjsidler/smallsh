@@ -27,6 +27,15 @@ struct Command {
 };
 
 
+void sigintHandler(int signo){
+    // Handles SIGINT for a foreground child so it can terminate itself
+    char* message = "Caught SIGINT!\n";
+    write(STDOUT_FILENO, message, 15);
+
+    exit(1);
+}
+
+
 void readLine(char* inputBuffer, const char* pidString, int pidStringLength) {
     // Reads in a line of input from stdin to inputBuffer that is a maximum of 2048 characters
     int index = 0;
@@ -85,6 +94,8 @@ int main(int argc, char* argv[]) {
         exit(1);
     }
 
+    struct sigaction sigintAction = {0};
+
     char inputBuffer[2048];
 
     pid_t childPids[500];
@@ -94,10 +105,11 @@ int main(int argc, char* argv[]) {
     pid_t backgroundPid;
     int backgroundProcessExitStatus = 0;
 
-    // Setup ignore_action to ignore SIGINT (Ctrl-C)
-    struct sigaction ignore_action = {0};
-    ignore_action.sa_handler = SIG_IGN;
-    sigaction(SIGINT, &ignore_action, NULL);
+
+    // Setup ignoreMask to ignore SIGINT (Ctrl-C) for the shell and background processes
+    sigset_t ignoreMask = {0};
+    sigaddset(&ignoreMask, SIGINT);
+    sigprocmask(SIG_SETMASK, &ignoreMask, NULL);
 
     // Get the PID for the smallsh instance in string form for variable expansion
     pid_t shellPid = getpid();
@@ -316,6 +328,12 @@ int main(int argc, char* argv[]) {
                 case 0:
                     // child - execute command, with arguments, in fg or bg
 
+                    // Implement SIGINT signal handler for foreground child process to terminate
+                    if (!userCommand.sendToBackground) {
+                        sigset_t unignoreMask = {0};
+                        sigprocmask(SIG_SETMASK, &unignoreMask, NULL);
+                    }
+
                     if (userCommand.input_redirect || userCommand.sendToBackground) {
                         int sourceFD;
 
@@ -402,12 +420,19 @@ int main(int argc, char* argv[]) {
                         // foreground processes must block when waited on
                         childProcessRun = true;
                         spawnpid = waitpid(spawnpid, &lastForegroundExitStatus, 0);
+
+                        // If foreground child signaled with SIGINT, notify immediately
+                        if (WIFSIGNALED(lastForegroundExitStatus)) {
+                            printf("terminated by signal %d\n", WTERMSIG(lastForegroundExitStatus));
+                        }
+                        fflush(stdout);
                     }
 
                     break;
             }
         }
 
+        // If user entered "exit", we break out of the command while loop and return
         if (strcmp(userCommand.commandName, "exit") == 0) break;
     }
 
