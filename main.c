@@ -238,25 +238,25 @@ int main(int argc, char* argv[]) {
 
 
         if (strcmp(userCommand.commandName, "cd") == 0) {
-            char cur_dir[FILENAME_MAX];
-            getcwd(cur_dir, sizeof(cur_dir));
-            printf("cwd is: %s\n", cur_dir);
-            fflush(stdout);
+//            char cur_dir[FILENAME_MAX];
+//            getcwd(cur_dir, sizeof(cur_dir));
+//            printf("cwd is: %s\n", cur_dir);
+//            fflush(stdout);
 
             // If user provided no arguments, chdir to $HOME, otherwise chdir to path provided
             if (userCommand.arguments[1] == NULL) {
                 if(chdir(getenv("HOME")) != 0) err(errno, "chdir()");
-                printf("path name is NULL. changing directory to $HOME\n");
-                fflush(stdout);
+//                printf("path name is NULL. changing directory to $HOME\n");
+//                fflush(stdout);
             } else {
                 if(chdir(userCommand.arguments[1]) != 0) err(errno, "chdir()");
-                printf("path name is not NULL. changing directory to %s\n", userCommand.arguments[1]);
-                fflush(stdout);
+//                printf("path name is not NULL. changing directory to %s\n", userCommand.arguments[1]);
+//                fflush(stdout);
             }
 
-            getcwd(cur_dir, sizeof(cur_dir));
-            printf("cwd is: %s\n", cur_dir);
-            fflush(stdout);
+//            getcwd(cur_dir, sizeof(cur_dir));
+//            printf("cwd is: %s\n", cur_dir);
+//            fflush(stdout);
 
         } else if (strcmp(userCommand.commandName, "exit") == 0) {
             // Exits smallsh. Takes no arguments. The shell will kill any other processes
@@ -327,7 +327,9 @@ int main(int argc, char* argv[]) {
                         }
 
                         if (sourceFD == -1) {
-                            perror("source open()");
+                            fprintf(stderr, "cannot open %s for input\n", userCommand.input_redirect_name);
+                            fflush(stderr);
+//                            perror("source open()");
                             exit(1);
                         }
 
@@ -350,7 +352,8 @@ int main(int argc, char* argv[]) {
                         }
 
                         if (targetFD == -1) {
-                            perror("target open()");
+                            fprintf(stderr, "cannot open %s for output\n", userCommand.output_redirect_name);
+//                            perror("target open()");
                             exit(1);
                         }
 
