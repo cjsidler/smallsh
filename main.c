@@ -27,11 +27,6 @@ struct Command {
 };
 
 
-void status(void) {
-
-}
-
-
 void readLine(char* inputBuffer, const char* pidString, int pidStringLength) {
     // Reads in a line of input from stdin to inputBuffer that is a maximum of 2048 characters
     int index = 0;
@@ -401,7 +396,7 @@ int main(int argc, char* argv[]) {
                         spawnpid = waitpid(spawnpid, &childStatus, WNOHANG);
 
                     } else {
-                        // foreground processes must be waited on
+                        // foreground processes must block when waited on
                         childProcessRun = true;
                         spawnpid = waitpid(spawnpid, &lastForegroundExitStatus, 0);
                     }
@@ -410,9 +405,6 @@ int main(int argc, char* argv[]) {
             }
         }
 
-
-
-        // TODO - Need to clean up all child processes here before breaking out?
         if (strcmp(userCommand.commandName, "exit") == 0) break;
     }
 
