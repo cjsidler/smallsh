@@ -112,33 +112,37 @@ int main(int argc, char* argv[]) {
 
 
     while (1) {
-        // Before re-prompting, have a while loop go forever until waitpid waiting for
-        // any process returns 0 (meaning no zombie processes to clean up at the moment,
-        // and then re-prompt the user)
-        while(childPidsCount > 0) {
-            // printf("childPidsCount is %d which is > than 0, checking if any have finished before re-prompt\n", childPidsCount);
+        // if there are childPids, loop through the count of child pids
+        // and waitpid(...WNOHANG) each to see if it can be reaped.
+        // if it can be reaped, print appropriate message, replace id in childPids with 0, decrease pid count
+        if (childPidsCount > 0) {
+            for (int i = 0; i < 500; i++) {
+                if (childPids[i] > 0) {
+                    backgroundPid = waitpid(childPids[i], &backgroundProcessExitStatus, WNOHANG);
 
-            backgroundPid = waitpid(-1, &backgroundProcessExitStatus, WNOHANG);
+                    if (backgroundPid == 0) {
+                        // this child process is not complete, continue to next
+                        continue;
+                    } else if (backgroundPid == -1) {
+                        // err has occurred
+                        printf("error has occurred; attempted to waitpid() on pid: %d\n", childPids[i]);
+                        fflush(stdout);
 
-            // ("backgroundPid is: %d\n", backgroundPid);
-
-            if (backgroundPid == 0) {
-                // no child process is complete, break out so we can re-prompt the user for a command
-                break;
-            } else if (backgroundPid == -1) {
-                // err has occurred, exit smallsh?
-                err(errno, "waitpid()");
-            } else {
-                // child process has completed, print out appropriate message and loop back around
-                if (WIFEXITED(backgroundProcessExitStatus)) {
-                    printf("background pid %d is done: exit value %d\n",
-                           backgroundPid, WEXITSTATUS(backgroundProcessExitStatus));
-                } else {
-                    printf("background pid %d is done: terminated by signal %d\n",
-                           backgroundPid, WTERMSIG(backgroundProcessExitStatus));
+                        err(errno, "waitpid()");
+                    } else {
+                        // child process has completed, print out appropriate message, replace pid in array with 0
+                        if (WIFEXITED(backgroundProcessExitStatus)) {
+                            printf("background pid %d is done: exit value %d\n",
+                                   backgroundPid, WEXITSTATUS(backgroundProcessExitStatus));
+                        } else {
+                            printf("background pid %d is done: terminated by signal %d\n",
+                                   backgroundPid, WTERMSIG(backgroundProcessExitStatus));
+                        }
+                        fflush(stdout);
+                        childPids[i] = 0;
+                        childPidsCount--;
+                    }
                 }
-                fflush(stdout);
-                childPidsCount--;
             }
         }
 
@@ -264,16 +268,18 @@ int main(int argc, char* argv[]) {
             // or jobs that the shell started before it terminates itself.
 
             // Loop through the childPids and kill each one and wait on it
-            for (int i = 0; i < childPidsCount; i++ ) {
+            for (int i = 0; i < 500; i++ ) {
                 // printf("killing child pid %d\n", childPids[i]);
 
                 // kill process with pid at childPids[i]
-                kill(childPids[i], SIGKILL);
+                if (childPids[i] > 0) {
+                    kill(childPids[i], SIGTERM);
 
-                int zombieStatus;
+                    int zombieStatus;
 
-                // wait on process with pid at childPids[i]
-                waitpid(childPids[i], &zombieStatus, 0);
+                    // wait on process with pid at childPids[i]
+                    waitpid(childPids[i], &zombieStatus, 0);
+                }
             }
 
             break;
@@ -315,12 +321,16 @@ int main(int argc, char* argv[]) {
                 case 0:
                     // child - execute command, with arguments, in fg or bg
 
-                    // TODO - handle input and output redirection using dup2()
-                    if (userCommand.input_redirect) {
-                        // redirect input for child using .input_redirect_name
+                    if (userCommand.input_redirect || userCommand.sendToBackground) {
+                        int sourceFD;
 
                         // open input file
-                        int sourceFD = open(userCommand.input_redirect_name, O_RDONLY);
+                        if (userCommand.input_redirect) {
+                            sourceFD = open(userCommand.input_redirect_name, O_RDONLY);
+                        } else {
+                            sourceFD = open("/dev/null", O_RDONLY);
+                        }
+
                         if (sourceFD == -1) {
                             perror("source open()");
                             exit(1);
@@ -334,11 +344,16 @@ int main(int argc, char* argv[]) {
                         }
                     }
 
-                    if (userCommand.output_redirect) {
-                        // redirect output for child
+                    if (userCommand.output_redirect || userCommand.sendToBackground) {
+                        int targetFD;
 
                         // open output file
-                        int targetFD = open(userCommand.output_redirect_name, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                        if (userCommand.output_redirect) {
+                            targetFD = open(userCommand.output_redirect_name, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                        } else {
+                            targetFD = open("/dev/null", O_WRONLY);
+                        }
+
                         if (targetFD == -1) {
                             perror("target open()");
                             exit(1);
@@ -373,12 +388,14 @@ int main(int argc, char* argv[]) {
 
                         // Find an empty slot in the childPids array to put new background process
                         int index = 0;
-                        while (index < 500 && childPids[index] != 0) {
+                        while (childPids[index] != 0) {
                             index++;
                         }
                         if (index < 500 && childPids[index] == 0) {
                             childPids[index] = spawnpid;
                             childPidsCount++;
+                        } else {
+                            err(errno=EAGAIN, "child processes full");
                         }
 
                         spawnpid = waitpid(spawnpid, &childStatus, WNOHANG);
@@ -386,7 +403,7 @@ int main(int argc, char* argv[]) {
                     } else {
                         // foreground processes must be waited on
                         childProcessRun = true;
-                        spawnpid = wait(&lastForegroundExitStatus);
+                        spawnpid = waitpid(spawnpid, &lastForegroundExitStatus, 0);
                     }
 
                     break;
