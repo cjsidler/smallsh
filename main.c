@@ -32,8 +32,8 @@ void disableForegroundOnlyMode(int signo);
 
 
 void enableForegroundOnlyMode(int signo) {
-    char* message = "\nEntering foreground-only mode (& is now ignored)\n";
-    write(STDOUT_FILENO, message, 50);
+    char* message = "\nEntering foreground-only mode (& is now ignored)\n: ";
+    write(STDOUT_FILENO, message, 52);
 
     foregroundOnlyMode = 1;
     signal(SIGTSTP, disableForegroundOnlyMode);
@@ -127,7 +127,7 @@ int main(int argc, char* argv[]) {
     // Setup sigtstpAction to toggle between enabling and disabling foreground-only mode
     sigtstpAction.sa_handler = enableForegroundOnlyMode;
     sigfillset(&sigtstpAction.sa_mask);
-    sigtstpAction.sa_flags = 0;
+    sigtstpAction.sa_flags = SA_RESTART;
     sigaction(SIGTSTP, &sigtstpAction, NULL);
 
     // Get the PID for the smallsh instance in string form for variable expansion
