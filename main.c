@@ -88,8 +88,7 @@ void readLine(char* inputBuffer, const char* pidString, int pidStringLength) {
         currentChar = fgetc(stdin);
     }
 
-    // If EOF actually found, exit with an error. If user did Ctrl-C, clear error and this function will
-    // return. In main, we will loop back again and read another line of input from the user.
+    // If EOF actually found, exit with an error. If user did Ctrl-C, clearerr and this function will return.
     if (feof(stdin)) {
         fprintf(stderr, "\nfgetc() found EOF; stdin must have been closed; exiting\n");
         exit(1);
@@ -109,9 +108,7 @@ int main(int argc, char* argv[]) {
     struct sigaction sigtstpAction = {0};
 
     sigset_t blockSIGTSTP = {0};
-//    sigset_t blockSIGINT = {0};
     sigaddset(&blockSIGTSTP, SIGTSTP);
-//    sigaddset(&blockSIGINT, SIGINT);
 
     char inputBuffer[2048];
 
@@ -121,7 +118,6 @@ int main(int argc, char* argv[]) {
 
     pid_t backgroundPid;
     int backgroundProcessExitStatus = 0;
-
 
     // Setup ignoreMask to ignore SIGINT (Ctrl-C) for the shell and background processes
     sigset_t ignoreMask = {0};
@@ -134,7 +130,6 @@ int main(int argc, char* argv[]) {
     sigtstpAction.sa_flags = 0;
     sigaction(SIGTSTP, &sigtstpAction, NULL);
 
-
     // Get the PID for the smallsh instance in string form for variable expansion
     pid_t shellPid = getpid();
     int pidStringLength = snprintf(NULL, 0, "%d", shellPid);
@@ -143,9 +138,7 @@ int main(int argc, char* argv[]) {
 
 
     while (1) {
-        // if there are childPids, loop through the count of child pids
-        // and waitpid(...WNOHANG) each to see if it can be reaped.
-        // if it can be reaped, print appropriate message, replace id in childPids with 0, decrease pid count
+        // reap any child processes before prompting the user
         if (childPidsCount > 0) {
             for (int i = 0; i < 500; i++) {
                 if (childPids[i] > 0) {
@@ -155,13 +148,11 @@ int main(int argc, char* argv[]) {
                         // this child process is not complete, continue to next
                         continue;
                     } else if (backgroundPid == -1) {
-                        // err has occurred
                         printf("error has occurred; attempted to waitpid() on pid: %d\n", childPids[i]);
                         fflush(stdout);
 
                         err(errno, "waitpid()");
                     } else {
-                        // child process has completed, print out appropriate message, replace pid in array with 0
                         if (WIFEXITED(backgroundProcessExitStatus)) {
                             printf("background pid %d is done: exit value %d\n",
                                    backgroundPid, WEXITSTATUS(backgroundProcessExitStatus));
@@ -187,7 +178,7 @@ int main(int argc, char* argv[]) {
 
         if (inputBuffer[0] == '#' || inputBuffer[0] == '\0' || inputBuffer[0] == '\n') continue;
 
-        // Declare a struct to store the user's command and initialize defaults
+        // Initialize a struct to store the user's command and parse via strtok
         struct Command userCommand;
         userCommand.totalArguments = 0;
         userCommand.input_redirect = false;
@@ -197,8 +188,6 @@ int main(int argc, char* argv[]) {
         char* token;
         int argumentIndex = 0;
 
-        // strtok the inputBuffer and break it up by empty spaces?
-        // first strtok gets you command
         token = strtok(inputBuffer, " ");
         if (token == NULL) {
             continue;
@@ -208,8 +197,7 @@ int main(int argc, char* argv[]) {
         userCommand.totalArguments++;
         argumentIndex++;
 
-
-        // then keep strtok until you get <, >, &, or NULL
+        // strtok until <, >, and/or &; break when NULL is found
         while (1) {
             token = strtok(NULL, " ");
             if (token == NULL) {
@@ -229,9 +217,9 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        // If last argument was '&', determine if process should run in background
         if (userCommand.totalArguments - 1 >= 0 && strcmp(userCommand.arguments[userCommand.totalArguments - 1], "&") == 0) {
-            // Last argument is &, make sendToBackground true if command is not exit, cd, or status
-            // or if foregoundOnlyMode is enabled
+            // Send to background if command is not exit, cd, or status or if foregroundOnlyMode is disabled
             if ( strcmp(userCommand.arguments[0], "exit") != 0 &&
                  strcmp(userCommand.arguments[0], "cd") != 0 &&
                  strcmp(userCommand.arguments[0], "status") != 0 &&
@@ -241,94 +229,37 @@ int main(int argc, char* argv[]) {
             // Replace the last argument (&) with NULL
             userCommand.arguments[userCommand.totalArguments - 1] = NULL;
         } else {
-            // Otherwise, make sure the last argument is NULL so exec will work
+            // Otherwise, simply ensure the last argument is NULL so exec will work
             userCommand.arguments[argumentIndex] = NULL;
             userCommand.totalArguments++;
         }
-
-
-        // TESTING - Print out the contents of the userCommand struct----------------------------------
-//        printf("userCommand.commandName = %s\n", userCommand.commandName);
-//
-//        printf("userCommand.totalArguments = %d\n", userCommand.totalArguments);
-//        printf("userCommand.arguments = ");
-//        for (int i = 0; i < userCommand.totalArguments; i++) {
-//            printf("%s ", userCommand.arguments[i]);
-//        }
-//        printf("\n");
-//
-//        if (userCommand.input_redirect == true) {
-//            printf("userCommand.input_redirect = true\n");
-//            printf("userCommand.input_redirect_name = %s\n", userCommand.input_redirect_name);
-//        } else {
-//            printf("userCommand.input_redirect = false\n");
-//        }
-//
-//        if (userCommand.output_redirect == true) {
-//            printf("userCommand.output_redirect = true\n");
-//            printf("userCommand.output_redirect_name = %s\n", userCommand.output_redirect_name);
-//        } else {
-//            printf("userCommand.output_redirect = false\n");
-//        }
-//
-//        printf("userCommand.sendToBackground = %s\n", userCommand.sendToBackground ? "true" : "false");
-        // --------------------------------------------------------------------------------------------
-
-
+        // Handle if user entered a built-in command or other command
         if (strcmp(userCommand.commandName, "cd") == 0) {
-//            char cur_dir[FILENAME_MAX];
-//            getcwd(cur_dir, sizeof(cur_dir));
-//            printf("cwd is: %s\n", cur_dir);
-//            fflush(stdout);
-
-            // If user provided no arguments, chdir to $HOME, otherwise chdir to path provided
+            // Change directory: If user provided no arguments, chdir to $HOME, otherwise chdir to path provided
             if (userCommand.arguments[1] == NULL) {
                 if(chdir(getenv("HOME")) != 0) err(errno, "chdir()");
-//                printf("path name is NULL. changing directory to $HOME\n");
-//                fflush(stdout);
             } else {
                 if(chdir(userCommand.arguments[1]) != 0) err(errno, "chdir()");
-//                printf("path name is not NULL. changing directory to %s\n", userCommand.arguments[1]);
-//                fflush(stdout);
             }
-
-//            getcwd(cur_dir, sizeof(cur_dir));
-//            printf("cwd is: %s\n", cur_dir);
-//            fflush(stdout);
-
         } else if (strcmp(userCommand.commandName, "exit") == 0) {
-            // Exits smallsh. Takes no arguments. The shell will kill any other processes
-            // or jobs that the shell started before it terminates itself.
-
-            // Loop through the childPids and kill each one and wait on it
+            // Exit smallsh: Kill any other processes or jobs that the shell started before terminating smallsh
             for (int i = 0; i < 500; i++ ) {
-                // printf("killing child pid %d\n", childPids[i]);
-
-                // kill process with pid at childPids[i]
                 if (childPids[i] > 0) {
                     kill(childPids[i], SIGTERM);
 
                     int zombieStatus;
-
-                    // wait on process with pid at childPids[i]
                     waitpid(childPids[i], &zombieStatus, 0);
                 }
             }
-
             break;
         } else if (strcmp(userCommand.commandName, "status") == 0) {
-            // Prints exit status or the terminating signal of the last foreground
-            // ran by smallsh. If run before any foreground command is run, the exit
-            // status of 0 is printed. Built-in shell commands cd, exit, and status
-            // are not counted as foreground processes and won't update status.
+            // Status: Prints exit value or signal of last terminated foreground signal (0 if none)
+            // Built-in shell commands cd, exit, and status are excluded.
             if (childProcessRun) {
-                // interpret lastForegroundExitStatus
                 if (WIFEXITED(lastForegroundExitStatus)) {
-                    // print exit status
                     printf("exit value %d\n", WEXITSTATUS(lastForegroundExitStatus));
                     fflush(stdout);
                 } else {
-                    // print signal number
                     printf("terminated by signal %d\n", WTERMSIG(lastForegroundExitStatus));
                     fflush(stdout);
                 }
@@ -336,15 +267,10 @@ int main(int argc, char* argv[]) {
                 printf("exit value 0\n");
                 fflush(stdout);
             }
-
         } else {
-            // spawn a child
+            // User is running a non-builtin command; fork a child processes and exec the command.
             int childStatus;
-
             pid_t spawnpid = fork();
-
-            // TODO - remove alarm after testing/debugging
-            alarm(60);
 
             switch (spawnpid) {
                 case -1: ;
@@ -352,23 +278,19 @@ int main(int argc, char* argv[]) {
                     exit(1);
 
                 case 0: ;
-                    // child - execute command, with arguments, in fg or bg
-
                     sigset_t childMask = {0};
 
-                    // Only background child processes will ignore SIGINT
+                    // Setup bg processes to ignore SIGINT and both bg and fg to ignore SIGTSTP
                     if (userCommand.sendToBackground) {
                         sigaddset(&childMask, SIGINT);
                     }
-
-                    // Both background and foreground child processes will ignore SIGTSTP
                     sigaddset(&childMask, SIGTSTP);
                     sigprocmask(SIG_SETMASK, &childMask, NULL);
 
+                    // Handle input and output file redirections; /dev/null for any that are not specified
                     if (userCommand.input_redirect || userCommand.sendToBackground) {
                         int sourceFD;
 
-                        // open input file
                         if (userCommand.input_redirect) {
                             sourceFD = open(userCommand.input_redirect_name, O_RDONLY);
                         } else {
@@ -378,11 +300,9 @@ int main(int argc, char* argv[]) {
                         if (sourceFD == -1) {
                             fprintf(stderr, "cannot open %s for input\n", userCommand.input_redirect_name);
                             fflush(stderr);
-//                            perror("source open()");
                             exit(1);
                         }
 
-                        // redirect stdin to file descriptor for input file
                         int result = dup2(sourceFD, 0);
                         if (result == -1) {
                             perror("source dup2()");
@@ -393,7 +313,6 @@ int main(int argc, char* argv[]) {
                     if (userCommand.output_redirect || userCommand.sendToBackground) {
                         int targetFD;
 
-                        // open output file
                         if (userCommand.output_redirect) {
                             targetFD = open(userCommand.output_redirect_name, O_WRONLY | O_CREAT | O_TRUNC, 0644);
                         } else {
@@ -402,11 +321,9 @@ int main(int argc, char* argv[]) {
 
                         if (targetFD == -1) {
                             fprintf(stderr, "cannot open %s for output\n", userCommand.output_redirect_name);
-//                            perror("target open()");
                             exit(1);
                         }
 
-                        // redirect stdout to file descriptor for output file
                         int result = dup2(targetFD, 1);
                         if (result == -1) {
                             perror("dup2");
@@ -414,32 +331,21 @@ int main(int argc, char* argv[]) {
                         }
                     }
 
+                    // Finally, execute command and handle errors
                     execvp(userCommand.commandName, userCommand.arguments);
-
                     fprintf(stderr, "%s: ", userCommand.commandName);
                     fflush(stderr);
                     perror("");
                     exit(EXIT_FAILURE);
 
                 default: ;
-                    // parent
-
-                    // if foregroundOnlyMode is set, don't send processes to the background
-                    // foreground only !
-                    // block SIGTSTP while letting processes finish
-                    // after process finishes, unblock SIGTSTP?
-
-                    // foreground? wait; background? return immediately
+                    // Parent: wait on fg processes and allow execution to continue for bg processes
                     if (userCommand.sendToBackground) {
-                        // don't wait for child
                         printf("background pid is %d\n", spawnpid);
                         fflush(stdout);
 
-                        // add child's PID to array to later be waited on before re-prompting user?
-                        // probably do the signal method?
+                        // Add child's PID to array to later be waited on before re-prompting user
                         if (childPidsCount >= 500) err(errno=EAGAIN, "child processes full");
-
-                        // Find an empty slot in the childPids array to put new background process
                         int index = 0;
                         while (childPids[index] != 0) {
                             index++;
@@ -454,18 +360,14 @@ int main(int argc, char* argv[]) {
                         spawnpid = waitpid(spawnpid, &childStatus, WNOHANG);
 
                     } else {
-                        // foreground processes must block when waited on
                         childProcessRun = true;
 
-                        // block SIGTSTP?
+                        // Wait on fg process; hold foregroundOnlyMode message til after execution by blocking SIGTSTP
                         sigprocmask(SIG_BLOCK, &blockSIGTSTP, NULL);
                         spawnpid = waitpid(spawnpid, &lastForegroundExitStatus, 0);
                         sigprocmask(SIG_UNBLOCK, &blockSIGTSTP, NULL);
 
-                        // unblock SIGTSTP?
-                        // check if the flag is set and if so toggle foreground?
-
-                        // If foreground child signaled with SIGINT, notify immediately
+                        // If fg child was signaled with SIGINT, notify immediately
                         if (WIFSIGNALED(lastForegroundExitStatus)) {
                             printf("terminated by signal %d\n", WTERMSIG(lastForegroundExitStatus));
                         }
@@ -476,7 +378,7 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // If user entered "exit", we break out of the command while loop and return
+        // If user entered "exit", break out to terminate smallsh
         if (strcmp(userCommand.commandName, "exit") == 0) break;
     }
 
