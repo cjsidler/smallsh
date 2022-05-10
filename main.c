@@ -168,6 +168,8 @@ int main(int argc, char* argv[]) {
             }
         }
 
+
+        fflush(stdout);
         // Prompt user for a command
         printf(": ");
         fflush(stdout);
